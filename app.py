@@ -557,6 +557,10 @@ if menu == "📊 Public Dashboard":
                         if df_shapes is not None:
                             trip_shape_map = df_gtfs_full.set_index('trip_id')['shape_id'].to_dict()
                             df_shapes_c = df_shapes.copy()
+                            df_shapes_c = df_shapes_c.sort_values(['shape_id', 'shape_pt_sequence'])
+                            df_shapes_c['shift_lat'] = df_shapes_c.groupby('shape_id')['shape_pt_lat'].shift()
+                            df_shapes_c['shift_lon'] = df_shapes_c.groupby('shape_id')['shape_pt_lon'].shift()
+                            df_shapes_c['dist'] = calc_haversine(df_shapes_c['shift_lat'], df_shapes_c['shift_lon'], df_shapes_c['shape_pt_lat'], df_shapes_c['shape_pt_lon']).fillna(0)
                             df_shapes_c['cum_dist'] = df_shapes_c.groupby('shape_id')['dist'].cumsum()
                             shape_dict = {k: v for k, v in df_shapes_c.groupby('shape_id')}
                             
@@ -590,6 +594,11 @@ if menu == "📊 Public Dashboard":
                         
                         short_segments = segments[segments['distance_km'] < batas_jarak].copy()
                         
+                        if not short_segments.empty:
+                            is_halte_1 = short_segments['stop_name'].isin(LIST_HALTE)
+                            is_halte_2 = short_segments['next_stop'].isin(LIST_HALTE)
+                            short_segments = short_segments[~(is_halte_1 & is_halte_2)]
+                            
                         if not short_segments.empty:
                             short_segments['Segmen'] = short_segments['stop_name'] + " -> " + short_segments['next_stop']
                             
