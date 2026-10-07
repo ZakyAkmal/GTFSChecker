@@ -475,4 +475,392 @@ if menu == "📊 Public Dashboard":
                                 fig_brt.update_layout(yaxis={'categoryorder':'total ascending'}, margin={"r":0,"t":10,"l":0,"b":0})
                                 st.plotly_chart(fig_brt, use_container_width=True)
                             else: st.info("Tidak ada data Halte BRT.")
-                        with col_
+                        with col_h2:
+                            st.markdown("**Top 20 Bus Stop / NFP**")
+                            if not df_bus_stop.empty:
+                                fig_bs = px.bar(df_bus_stop, x='usage_count', y='stop_name', orientation='h', color='usage_count', color_continuous_scale="Blues")
+                                fig_bs.update_layout(yaxis={'categoryorder':'total ascending'}, margin={"r":0,"t":10,"l":0,"b":0})
+                                st.plotly_chart(fig_bs, use_container_width=True)
+                            else: st.info("Tidak ada data Bus Stop.")
+                            
+                        st.markdown("---")
+                        st.markdown("### Tabel Daftar Analitik Seluruh Halte & Bus Stop")
+                        if df_histori_full is not None and not df_histori_full.empty and df_stop_times is not None and df_stops is not None:
+                            df_h_temp = df_histori_full[['trip_id', 'route_id', 'tanggal_merge']].copy()
+                            df_st_temp = pd.merge(df_stop_times, df_stops, on='stop_id')[['trip_id', 'stop_name']].drop_duplicates()
+                            df_merged = pd.merge(df_h_temp, df_st_temp, on='trip_id', how='inner')
+                            
+                            if not df_merged.empty:
+                                routes_per_stop = df_merged.groupby('stop_name')['route_id'].unique().apply(lambda x: ', '.join(sorted(x))).reset_index(name='Rute yang Melintas')
+                                dominant_route = df_merged.groupby('stop_name')['route_id'].agg(lambda x: x.mode()[0] if not x.mode().empty else "-").reset_index(name='Rute Paling Dominan')
+                                total_usage = df_merged.groupby('stop_name').size().reset_index(name='Jumlah Digunakan (Total)')
+                                
+                                jml_hari = df_merged['tanggal_merge'].nunique()
+                                if jml_hari == 0: jml_hari = 1
+                                total_usage['Rata-rata Bus Melintas Harian'] = (total_usage['Jumlah Digunakan (Total)'] / jml_hari).round(1)
+                                
+                                df_table_halte = pd.merge(total_usage, routes_per_stop, on='stop_name')
+                                df_table_halte = pd.merge(df_table_halte, dominant_route, on='stop_name')
+                                df_table_halte = df_table_halte.rename(columns={'stop_name': 'Nama Halte/Bus Stop'})
+                                
+                                df_table_halte = df_table_halte.sort_values('Rute Paling Dominan').reset_index(drop=True)
+                                st.dataframe(df_table_halte, use_container_width=True)
+                            else:
+                                st.info("Data histori tidak mencukupi untuk memuat detail keseluruhan tabel ini.")
+                        else:
+                            st.info("Data histori atau GTFS belum lengkap untuk memuat tabel analitik.")
+
+                        with st.expander("📉 Peta & Grafik Halte Tersepi (Jarang Digunakan)", expanded=False):
+                            col_s1, col_s2 = st.columns(2)
+                            df_halte_brt_sepi = df_hp[df_hp['is_halte'] == True].sort_values('usage_count', ascending=True).head(20)
+                            df_bus_stop_sepi = df_hp[df_hp['is_halte'] == False].sort_values('usage_count', ascending=True).head(20)
+
+                            with col_s1:
+                                st.markdown("**Bottom 20 Halte BRT**")
+                                if not df_halte_brt_sepi.empty:
+                                    fig_brt_sepi = px.bar(df_halte_brt_sepi, x='usage_count', y='stop_name', orientation='h', color='usage_count', color_continuous_scale="Reds")
+                                    fig_brt_sepi.update_layout(yaxis={'categoryorder':'total descending'}, margin={"r":0,"t":10,"l":0,"b":0})
+                                    st.plotly_chart(fig_brt_sepi, use_container_width=True)
+                            with col_s2:
+                                st.markdown("**Bottom 20 Bus Stop / NFP**")
+                                if not df_bus_stop_sepi.empty:
+                                    fig_bs_sepi = px.bar(df_bus_stop_sepi, x='usage_count', y='stop_name', orientation='h', color='usage_count', color_continuous_scale="Blues")
+                                    fig_bs_sepi.update_layout(yaxis={'categoryorder':'total descending'}, margin={"r":0,"t":10,"l":0,"b":0})
+                                    st.plotly_chart(fig_bs_sepi, use_container_width=True)
+
+                with tab_chart:
+                    st.markdown("### Kepadatan Operasional (Berdasarkan Histori)")
+                    if df_histori_full is not None:
+                        df_h = df_histori_full.copy()
+                        if not df_h.empty:
+                            df_h['Jenis Layanan'] = df_h['route_id'].map(MASTER_LAYANAN).fillna("Lainnya")
+                            df_h['Nama Rute Tampil'] = df_h['route_name'] + " (" + df_h['trip_id'] + ")"
+                            selected_layanan = st.selectbox("Filter Layanan:", ["Semua Layanan"] + sorted(df_h['Jenis Layanan'].unique().tolist()), key="chart_layanan")
+                            df_chart = df_h[df_h['Jenis Layanan'] == selected_layanan] if selected_layanan != "Semua Layanan" else df_h
+                            if not df_chart.empty:
+                                route_perf = df_chart.groupby('Nama Rute Tampil').size().reset_index(name='Total').sort_values('Total', ascending=False).head(20)
+                                fig_bar = px.bar(route_perf, x='Total', y='Nama Rute Tampil', orientation='h', color='Total', color_continuous_scale="Blues")
+                                fig_bar.update_layout(yaxis={'categoryorder':'total ascending'}, margin={"r":0,"t":10,"l":0,"b":0})
+                                st.plotly_chart(fig_bar, use_container_width=True)
+
+                    st.markdown("---")
+                    st.markdown("### Analisis Segmen Halte (Jarak Terlalu Pendek)")
+                    st.write("Mendeteksi segmen antar halte yang jaraknya kurang dari batas tertentu.")
+                    
+                    batas_jarak = st.slider("Batas Jarak Jauh Segmen (KM):", min_value=0.05, max_value=1.0, value=0.20, step=0.05)
+                    
+                    if df_stop_times is not None and df_stops is not None and df_histori_full is not None and not df_histori_full.empty:
+                        df_hist = df_histori_full
+                        st_merged = pd.merge(df_stop_times, df_stops, on='stop_id', how='inner')
+                        st_merged = st_merged.sort_values(['trip_id', 'stop_sequence'])
+                        
+                        if df_shapes is not None:
+                            trip_shape_map = df_gtfs_full.set_index('trip_id')['shape_id'].to_dict()
+                            df_shapes_c = df_shapes.copy()
+                            df_shapes_c['cum_dist'] = df_shapes_c.groupby('shape_id')['dist'].cumsum()
+                            shape_dict = {k: v for k, v in df_shapes_c.groupby('shape_id')}
+                            
+                            active_trips = df_hist['trip_id'].unique()
+                            st_merged = st_merged[st_merged['trip_id'].isin(active_trips)].copy()
+                            st_merged['shape_id'] = st_merged['trip_id'].map(trip_shape_map)
+                            
+                            def get_cum_dist(row):
+                                s_id = row['shape_id']
+                                if pd.isna(s_id) or s_id not in shape_dict:
+                                    return 0
+                                s_grp = shape_dict[s_id]
+                                dists = (s_grp['shape_pt_lat'] - row['stop_lat'])**2 + (s_grp['shape_pt_lon'] - row['stop_lon'])**2
+                                return s_grp.loc[dists.idxmin(), 'cum_dist']
+                                
+                            st_merged['cum_dist'] = st_merged.apply(get_cum_dist, axis=1)
+                            st_merged['next_stop'] = st_merged.groupby('trip_id')['stop_name'].shift(-1)
+                            st_merged['next_cum_dist'] = st_merged.groupby('trip_id')['cum_dist'].shift(-1)
+                            
+                            segments = st_merged.dropna(subset=['next_stop']).copy()
+                            segments['distance_km'] = (segments['next_cum_dist'] - segments['cum_dist']).abs()
+                        else:
+                            st_merged['next_stop'] = st_merged.groupby('trip_id')['stop_name'].shift(-1)
+                            st_merged['next_lat'] = st_merged.groupby('trip_id')['stop_lat'].shift(-1)
+                            st_merged['next_lon'] = st_merged.groupby('trip_id')['stop_lon'].shift(-1)
+                            
+                            active_trips = df_hist['trip_id'].unique()
+                            segments = st_merged[st_merged['trip_id'].isin(active_trips)].copy()
+                            segments = segments.dropna(subset=['next_stop'])
+                            segments['distance_km'] = calc_haversine(segments['stop_lat'], segments['stop_lon'], segments['next_lat'], segments['next_lon'])
+                        
+                        short_segments = segments[segments['distance_km'] < batas_jarak].copy()
+                        
+                        if not short_segments.empty:
+                            short_segments['Segmen'] = short_segments['stop_name'] + " -> " + short_segments['next_stop']
+                            
+                            seg_grouped = short_segments.groupby('Segmen').agg(
+                                Jumlah_Trip_Terdampak=('trip_id', 'nunique'),
+                                Trip_ID=('trip_id', lambda x: ', '.join(sorted(set(x))))
+                            ).reset_index()
+                            
+                            seg_grouped = seg_grouped.rename(columns={'Jumlah_Trip_Terdampak': 'Jumlah Trip Terdampak'})
+                            seg_grouped = seg_grouped.sort_values('Trip_ID').reset_index(drop=True)
+                            
+                            st.dataframe(seg_grouped, use_container_width=True)
+                        else:
+                            st.success("Tidak ada segmen antar halte yang berada di bawah batas jarak tersebut.")
+                    else:
+                        st.warning("Data GTFS atau Histori belum lengkap untuk analisis segmen.")
+
+                with tab_komplain_ui:
+                    st.markdown("### Korelasi Kinerja Operasional & Keluhan Pelanggan")
+                    if df_histori_full is not None and not df_histori_full.empty:
+                        df_h_all = df_histori_full.copy()
+                        selected_route_komplain = st.selectbox("Pilih Route ID untuk dianalisis:", sorted(df_h_all['route_id'].unique()), key="komplain_rute")
+                        
+                        if selected_route_komplain:
+                            df_h_rute = df_h_all[df_h_all['route_id'] == selected_route_komplain].copy()
+                            
+                            st.markdown("#### 📌 Ringkasan Metrik Rute")
+                            filter_waktu = st.radio("Filter Waktu Operasional:", ["Semua Rentang Waktu", "Peak Hour Saja"], horizontal=True)
+                            
+                            if filter_waktu == "Peak Hour Saja":
+                                df_metric_filtered = df_h_rute[df_h_rute['j_s'].dt.hour.isin([6,7,8,16,17,18,19])]
+                            else:
+                                df_metric_filtered = df_h_rute
+                            
+                            avg_wait = df_metric_filtered['duration_mins'].mean() if not df_metric_filtered.empty else 0
+                            prime_trip_count = len(df_metric_filtered)
+                            
+                            k1, k2 = st.columns(2)
+                            k1.metric("Rata-rata Waktu Tempuh (Avg)", format_time(avg_wait))
+                            k2.metric("Jumlah Trip Terlaksana", prime_trip_count)
+                            st.markdown("---")
+
+                            analisis_mode = st.radio("Mode Analisis:", ["Tren Harian", "Rincian Per Jam (Pilih Tanggal)"], horizontal=True)
+                            
+                            if analisis_mode == "Tren Harian":
+                                if 'tanggal_merge' in df_metric_filtered.columns:
+                                    df_valid = df_metric_filtered.dropna(subset=['tanggal_merge', 'duration_mins'])
+                                    
+                                    prime_trips_for_route = []
+                                    if df_most_frequent is not None:
+                                        prime_trips_for_route = df_most_frequent[df_most_frequent['Route_ID'] == selected_route_komplain]['Trip_ID'].tolist()
+                                    
+                                    df_valid['Kategori Trip'] = df_valid['trip_id'].apply(lambda x: 'Prime Trip' if x in prime_trips_for_route else 'Trip Lainnya')
+                                    daily_counts = df_valid.groupby(['tanggal_merge', 'Kategori Trip']).size().unstack(fill_value=0).reset_index()
+                                    
+                                    if 'Prime Trip' not in daily_counts.columns: daily_counts['Prime Trip'] = 0
+                                    if 'Trip Lainnya' not in daily_counts.columns: daily_counts['Trip Lainnya'] = 0
+                                    daily_counts['Total Trip'] = daily_counts['Prime Trip'] + daily_counts['Trip Lainnya']
+                                    
+                                    df_prime_only = df_valid[df_valid['Kategori Trip'] == 'Prime Trip']
+                                    if not df_prime_only.empty:
+                                        daily_trip_time = df_prime_only.groupby(['tanggal_merge', 'trip_id']).apply(get_iqr_avg).reset_index(name='mean_time')
+                                        daily_time = daily_trip_time.groupby('tanggal_merge')['mean_time'].sum().reset_index(name='Waktu Tempuh (Mnt)')
+                                    else:
+                                        daily_time = pd.DataFrame(columns=['tanggal_merge', 'Waktu Tempuh (Mnt)'])
+                                    
+                                    df_plot = pd.merge(daily_counts, daily_time, on='tanggal_merge', how='outer').fillna(0)
+                                    df_plot['Komplain'] = 0
+                                    
+                                    if df_komplain is not None:
+                                        df_k = df_komplain
+                                        c_rute = next((c for c in df_k.columns if str(c).strip().lower() == 'kode rute'), None)
+                                        if c_rute:
+                                            df_k_r = df_k[df_k[c_rute] == selected_route_komplain]
+                                            if not df_k_r.empty:
+                                                d_komp = df_k_r.groupby('tanggal_merge').size().reset_index(name='Komplain')
+                                                df_plot = pd.merge(df_plot.drop(columns=['Komplain']), d_komp, on='tanggal_merge', how='left').fillna(0)
+                                    
+                                    df_plot = df_plot.sort_values('tanggal_merge')
+                                    df_plot['tanggal_str'] = pd.to_datetime(df_plot['tanggal_merge']).dt.strftime('%d-%m-%Y')
+                                    
+                                    fig = go.Figure()
+                                    fig.add_trace(go.Scatter(x=df_plot['tanggal_str'], y=df_plot['Total Trip'], fill='tozeroy', mode='none', name='Kumulatif Seluruh Trip', fillcolor='rgba(46, 204, 113, 0.3)', yaxis='y1'))
+                                    fig.add_trace(go.Scatter(x=df_plot['tanggal_str'], y=df_plot['Prime Trip'], mode='lines+markers', name='Prime Trip (Total)', line=dict(color='#3498db', width=2), yaxis='y1'))
+                                    fig.add_trace(go.Scatter(x=df_plot['tanggal_str'], y=df_plot['Trip Lainnya'], mode='lines+markers', name='Trip Lainnya (Total)', opacity=0.7, line=dict(color='#95a5a6', width=2), yaxis='y1'))
+                                    fig.add_trace(go.Scatter(x=df_plot['tanggal_str'], y=df_plot['Waktu Tempuh (Mnt)'], mode='lines+markers', name='Waktu Tempuh', line=dict(color='#f39c12', width=3), yaxis='y2'))
+                                    
+                                    avg_time_val = df_plot['Waktu Tempuh (Mnt)'].mean()
+                                    if avg_time_val > 0:
+                                        fig.add_hline(y=avg_time_val, line_dash="dash", line_color="#f39c12", yref="y2", annotation_text=f"Avg Waktu: {avg_time_val:.0f} Mnt", annotation_position="top left", annotation_font_color="#f39c12")
+
+                                    fig.add_trace(go.Bar(x=df_plot['tanggal_str'], y=df_plot['Komplain'], name='Jumlah Komplain', marker_color='rgba(231, 76, 60, 0.7)', yaxis='y3'))
+
+                                    y3_max = df_plot['Komplain'].max() + 2 if df_plot['Komplain'].max() > 0 else 5
+                                    fig.update_layout(
+                                        title=dict(text="Tren Kinerja & Komplain (Harian)"),
+                                        xaxis=dict(title=dict(text="Tanggal"), type='category', domain=[0.0, 0.85]),
+                                        yaxis=dict(title=dict(text="Volume Trip", font=dict(color="#2ecc71")), tickfont=dict(color="#2ecc71"), rangemode="tozero"),
+                                        yaxis2=dict(title=dict(text="Waktu Tempuh (Menit)", font=dict(color="#f39c12")), tickfont=dict(color="#f39c12"), anchor="x", overlaying="y", side="right", rangemode="tozero"),
+                                        yaxis3=dict(title=dict(text="Jumlah Komplain", font=dict(color="#e74c3c")), tickfont=dict(color="#e74c3c"), anchor="free", overlaying="y", side="right", position=0.95, range=[0, y3_max], dtick=1, rangemode="tozero"),
+                                        hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True)
+
+                            else:
+                                if 'tanggal_merge' in df_metric_filtered.columns:
+                                    available_dates = sorted(df_metric_filtered['tanggal_merge'].dropna().unique())
+                                    if available_dates:
+                                        selected_date = st.selectbox("Pilih Tanggal:", available_dates)
+                                        df_h_date = df_metric_filtered.dropna(subset=['j_s', 'duration_mins'])
+                                        df_h_date = df_h_date[df_h_date['tanggal_merge'] == selected_date].copy()
+                                        df_jam = pd.DataFrame({'Jam': range(24)})
+                                        
+                                        if not df_h_date.empty:
+                                            df_h_date['Jam_Mulai'] = df_h_date['j_s'].dt.hour
+                                            hourly_counts = df_h_date.groupby('Jam_Mulai').size().reset_index(name='Total Trip')
+                                            hourly_time = df_h_date.groupby('Jam_Mulai').apply(get_iqr_avg).reset_index()
+                                            hourly_time.columns = ['Jam_Mulai', 'Waktu Tempuh (Mnt)']
+                                            df_jam = pd.merge(df_jam, hourly_counts, left_on='Jam', right_on='Jam_Mulai', how='left').fillna(0)
+                                            df_jam = pd.merge(df_jam, hourly_time, left_on='Jam', right_on='Jam_Mulai', how='left').fillna(0)
+                                        else: 
+                                            df_jam['Waktu Tempuh (Mnt)'] = 0
+                                            df_jam['Total Trip'] = 0
+                                            
+                                        df_jam['Komplain'] = 0
+                                        if df_komplain is not None:
+                                            df_k = df_komplain
+                                            c_rute = next((c for c in df_k.columns if str(c).strip().lower() == 'kode rute'), None)
+                                            if c_rute:
+                                                df_k_d = df_k[(df_k[c_rute] == selected_route_komplain) & (df_k['tanggal_merge'] == selected_date)]
+                                                if not df_k_d.empty and 'jam_komplain' in df_k_d.columns:
+                                                    h_komp = df_k_d.groupby('jam_komplain').size().reset_index(name='Komplain')
+                                                    df_jam = pd.merge(df_jam.drop(columns=['Komplain']), h_komp, left_on='Jam', right_on='jam_komplain', how='left').fillna(0)
+                                                    
+                                        df_jam['Jam_Str'] = df_jam['Jam'].astype(str).str.zfill(2) + ":00"
+                                        
+                                        fig2 = go.Figure()
+                                        fig2.add_trace(go.Scatter(x=df_jam['Jam_Str'], y=df_jam['Total Trip'], fill='tozeroy', mode='none', name='Volume Trip', fillcolor='rgba(46, 204, 113, 0.3)', yaxis='y1'))
+                                        fig2.add_trace(go.Scatter(x=df_jam['Jam_Str'], y=df_jam['Waktu Tempuh (Mnt)'], mode='lines+markers', name='Waktu Tempuh', line=dict(color='#f39c12', width=3, shape='spline'), yaxis='y2'))
+                                        fig2.add_trace(go.Bar(x=df_jam['Jam_Str'], y=df_jam['Komplain'], name='Komplain', marker_color='rgba(231, 76, 60, 0.7)', yaxis='y3'))
+
+                                        avg_time_jam = df_jam[df_jam['Waktu Tempuh (Mnt)'] > 0]['Waktu Tempuh (Mnt)'].mean()
+                                        if pd.notna(avg_time_jam) and avg_time_jam > 0:
+                                            fig2.add_hline(y=avg_time_jam, line_dash="dash", line_color="#f39c12", yref="y2", annotation_text=f"Avg Waktu: {avg_time_jam:.0f} Mnt", annotation_position="top left", annotation_font_color="#f39c12")
+
+                                        y3_max_jam = df_jam['Komplain'].max() + 2 if df_jam['Komplain'].max() > 0 else 3
+                                        fig2.update_layout(
+                                            title=dict(text=f"Distribusi Waktu Tempuh, Volume, & Komplain Per Jam ({selected_date})"),
+                                            xaxis=dict(title=dict(text="Jam Operasional"), type='category', tickangle=-45, domain=[0.0, 0.85]),
+                                            yaxis=dict(title=dict(text="Volume Trip", font=dict(color="#2ecc71")), tickfont=dict(color="#2ecc71"), rangemode="tozero"),
+                                            yaxis2=dict(title=dict(text="Waktu Tempuh (Menit)", font=dict(color="#f39c12")), tickfont=dict(color="#f39c12"), anchor="x", overlaying="y", side="right", rangemode="tozero"),
+                                            yaxis3=dict(title=dict(text="Jumlah Komplain", font=dict(color="#e74c3c")), tickfont=dict(color="#e74c3c"), anchor="free", overlaying="y", side="right", position=0.95, range=[0, y3_max_jam], dtick=1, rangemode="tozero"),
+                                            hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                                        )
+                                        st.plotly_chart(fig2, use_container_width=True)
+
+                with tab_bus:
+                    st.markdown("### Analisis Jumlah Bus Beredar")
+                    st.write("Tabel ini menghitung jumlah bus yang sedang beroperasi pada jam tertentu. Perhitungan didasarkan pada waktu mulai trip (start) ditambah dengan rata-rata waktu tempuh (average travel time) dari trip tersebut.")
+                    
+                    if df_histori_full is not None and not df_histori_full.empty:
+                        df_bus = df_histori_full.copy()
+                        df_bus = df_bus.dropna(subset=['j_s', 'tanggal_merge', 'duration_mins'])
+                        
+                        if not df_bus.empty:
+                            avg_dur_df = df_bus.groupby('trip_id')['duration_mins'].mean().reset_index(name='avg_dur')
+                            df_bus = df_bus.merge(avg_dur_df, on='trip_id', how='left')
+                            
+                            df_bus['estimasi_selesai'] = df_bus['j_s'] + pd.to_timedelta(df_bus['avg_dur'], unit='m')
+                            
+                            df_bus['start_d'] = df_bus['j_s'].dt.date
+                            df_bus['end_d'] = df_bus['estimasi_selesai'].dt.date
+                            df_bus['start_h'] = df_bus['j_s'].dt.hour
+                            df_bus['end_h'] = df_bus['estimasi_selesai'].dt.hour
+                            df_bus['Jenis Layanan'] = df_bus['route_id'].map(MASTER_LAYANAN).fillna("Lainnya")
+                            
+                            available_dates = sorted(df_bus['tanggal_merge'].unique())
+                            available_hours = list(range(24))
+                            
+                            col_b1, col_b2 = st.columns(2)
+                            with col_b1:
+                                pilih_tgl_bus = st.selectbox("Pilih Tanggal:", ["Semua Tanggal (Rata-rata)"] + [str(d) for d in available_dates], key="bus_tgl")
+                            with col_b2:
+                                pilih_jam_bus = st.selectbox("Pilih Jam Operasional:", available_hours, index=5, key="bus_jam")
+                                
+                            same_day = df_bus['start_d'] == df_bus['end_d']
+                            diff_day = df_bus['start_d'] < df_bus['end_d']
+                            
+                            hourly_counts = []
+                            if pilih_tgl_bus == "Semua Tanggal (Rata-rata)":
+                                for h in range(24):
+                                    cond_same_h = same_day & (df_bus['start_h'] <= h) & (df_bus['end_h'] >= h)
+                                    cond_diff_h = diff_day & ((h >= df_bus['start_h']) | (h <= df_bus['end_h']))
+                                    active_h = df_bus[cond_same_h | cond_diff_h]
+                                    
+                                    if h in [23, 0, 1, 2, 3, 4]:
+                                        active_h = active_h[(active_h['Jenis Layanan'] == 'BRT') | (active_h['route_id'].isin(['JAK.36', 'JAK.75', 'JAK.47', 'JAK.52']))]
+                                    
+                                    if not active_h.empty:
+                                        unique_dates_h = active_h['tanggal_merge'].nunique()
+                                        avg_active_h = len(active_h) / unique_dates_h if unique_dates_h > 0 else 0
+                                        hourly_counts.append({'Jam': f"{h:02d}:00", 'Jumlah Bus': avg_active_h})
+                                    else:
+                                        hourly_counts.append({'Jam': f"{h:02d}:00", 'Jumlah Bus': 0})
+                            else:
+                                df_bus_date = df_bus[df_bus['tanggal_merge'].astype(str) == pilih_tgl_bus]
+                                same_day_d = df_bus_date['start_d'] == df_bus_date['end_d']
+                                diff_day_d = df_bus_date['start_d'] < df_bus_date['end_d']
+                                
+                                for h in range(24):
+                                    cond_same_h = same_day_d & (df_bus_date['start_h'] <= h) & (df_bus_date['end_h'] >= h)
+                                    cond_diff_h = diff_day_d & ((h >= df_bus_date['start_h']) | (h <= df_bus_date['end_h']))
+                                    active_h = df_bus_date[cond_same_h | cond_diff_h]
+                                    
+                                    if h in [23, 0, 1, 2, 3, 4]:
+                                        active_h = active_h[(active_h['Jenis Layanan'] == 'BRT') | (active_h['route_id'].isin(['JAK.36', 'JAK.75', 'JAK.47', 'JAK.52']))]
+                                        
+                                    hourly_counts.append({'Jam': f"{h:02d}:00", 'Jumlah Bus': len(active_h)})
+                                    
+                            df_hourly_trend = pd.DataFrame(hourly_counts)
+                            fig_bus_trend = px.line(df_hourly_trend, x='Jam', y='Jumlah Bus', markers=True, title=f"Tren Seluruh Bus Beredar per Jam ({pilih_tgl_bus})", line_shape="spline")
+                            fig_bus_trend.update_layout(yaxis_title="Total Bus Aktif", xaxis_title="Jam Operasional")
+                            st.plotly_chart(fig_bus_trend, use_container_width=True)
+
+                            st.markdown(f"#### Rincian Rute Beroperasi pada Jam {pilih_jam_bus}:00")
+                            
+                            cond_same = same_day & (df_bus['start_h'] <= pilih_jam_bus) & (df_bus['end_h'] >= pilih_jam_bus)
+                            cond_diff = diff_day & ((pilih_jam_bus >= df_bus['start_h']) | (pilih_jam_bus <= df_bus['end_h']))
+                            
+                            df_active = df_bus[cond_same | cond_diff].copy()
+                            
+                            if pilih_jam_bus in [23, 0, 1, 2, 3, 4]:
+                                df_active = df_active[(df_active['Jenis Layanan'] == 'BRT') | (df_active['route_id'].isin(['JAK.36', 'JAK.75', 'JAK.47', 'JAK.52']))]
+                                
+                            if pilih_tgl_bus == "Semua Tanggal (Rata-rata)":
+                                if not df_active.empty:
+                                    daily_count = df_active.groupby(['route_id', 'tanggal_merge']).size().reset_index(name='count')
+                                    avg_count = daily_count.groupby('route_id')['count'].mean().reset_index(name='Jumlah Bus Beredar')
+                                    avg_count['Jumlah Bus Beredar'] = avg_count['Jumlah Bus Beredar'].round(1)
+                                    avg_count['Jenis Layanan'] = avg_count['route_id'].map(MASTER_LAYANAN).fillna("Lainnya")
+                                    avg_count = avg_count[['route_id', 'Jenis Layanan', 'Jumlah Bus Beredar']].sort_values('route_id').reset_index(drop=True)
+                                    st.dataframe(avg_count, use_container_width=True)
+                                else:
+                                    st.warning(f"Tidak ada bus yang beredar pada jam {pilih_jam_bus}:00 secara keseluruhan.")
+                            else:
+                                df_active_date = df_active[df_active['tanggal_merge'].astype(str) == pilih_tgl_bus]
+                                if not df_active_date.empty:
+                                    count_date = df_active_date.groupby('route_id').size().reset_index(name='Jumlah Bus Beredar')
+                                    count_date['Jenis Layanan'] = count_date['route_id'].map(MASTER_LAYANAN).fillna("Lainnya")
+                                    count_date = count_date[['route_id', 'Jenis Layanan', 'Jumlah Bus Beredar']].sort_values('route_id').reset_index(drop=True)
+                                    st.dataframe(count_date, use_container_width=True)
+                                else:
+                                    st.warning(f"Tidak ada bus yang beredar pada tanggal {pilih_tgl_bus} di jam {pilih_jam_bus}:00.")
+                        else:
+                            st.warning("Data operasional tidak memiliki waktu yang valid.")
+            except Exception as e:
+                st.error(f"Gagal memuat memori file .pkl: {e}")
+
+elif menu == "📥 Data Downloader":
+    st.title("📥 Data Downloader")
+    st.write("Download master data rute Transit menjadi file Excel.")
+    
+    if st.button("🌐 Download Data API Master"):
+        with st.spinner("Processing..."):
+            try:
+                resp = requests.get("http://transit.transjakarta.co.id:8182/api/v1/master/rute-table", timeout=20).json()
+                api_response = resp['data'] if isinstance(resp, dict) and 'data' in resp else resp
+                st.session_state.api_download_df = pd.DataFrame(api_response)
+                st.success(f"Berhasil menarik {len(st.session_state.api_download_df)} baris data!")
+            except Exception as e: st.error(f"Error: {e}")
+                
+    if st.session_state.api_download_df is not None:
+        st.dataframe(st.session_state.api_download_df.head(5), use_container_width=True)
+        st.download_button(label="📥 Download Data Master Rute Transit (.xlsx)", data=to_excel(st.session_state.api_download_df), file_name='Master_Rute_Transit.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', type="primary")
